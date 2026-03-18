@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -359,46 +358,37 @@ func (bm *BackupMerger) mergeIndexedDB(db1, db2, merged map[string]interface{}) 
 	return nil
 }
 
-// 合并表数据
+// 合并表数据（委托给 mergeArrays）
 func (bm *BackupMerger) mergeTable(table1, table2 []interface{}, tableName string) ([]interface{}, error) {
+	return bm.mergeArrays(table1, table2, tableName)
+}
+
+// 合并对象数组（按 ID 合并，递归处理差异）
+func (bm *BackupMerger) mergeArrays(arr1, arr2 []interface{}, context string) ([]interface{}, error) {
 	merged := make([]interface{}, 0)
 	processedIds := make(map[string]bool)
 
-	// 创建ID映射
 	map1 := make(map[string]interface{})
 	map2 := make(map[string]interface{})
 
-	// 处理第一个表
-	for i, item := range table1 {
+	for i, item := range arr1 {
 		if itemMap, ok := item.(map[string]interface{}); ok {
 			id := getItemId(itemMap, i)
 			map1[id] = item
 		}
 	}
-
-	// 处理第二个表
-	for i, item := range table2 {
+	for i, item := range arr2 {
 		if itemMap, ok := item.(map[string]interface{}); ok {
 			id := getItemId(itemMap, i)
 			map2[id] = item
 		}
 	}
 
-	// 合并记录
 	for id, item1 := range map1 {
 		processedIds[id] = true
-
 		if item2, exists := map2[id]; exists {
-			// 检查是否有冲突
 			if !reflect.DeepEqual(item1, item2) {
-				conflictType := getConflictType(tableName)
-				resolved, err := bm.resolveConflict(Conflict{
-					Type:    conflictType,
-					Key:     id,
-					Value1:  item1,
-					Value2:  item2,
-					Context: fmt.Sprintf("%s[%s]", tableName, id),
-				})
+				resolved, err := bm.mergeValue(item1, item2, fmt.Sprintf("%s[%s]", context, id))
 				if err != nil {
 					return nil, err
 				}
@@ -410,8 +400,6 @@ func (bm *BackupMerger) mergeTable(table1, table2 []interface{}, tableName strin
 			merged = append(merged, item1)
 		}
 	}
-
-	// 添加第二个表中独有的记录
 	for id, item2 := range map2 {
 		if !processedIds[id] {
 			merged = append(merged, item2)
@@ -421,30 +409,61 @@ func (bm *BackupMerger) mergeTable(table1, table2 []interface{}, tableName strin
 	return merged, nil
 }
 
-// 合并map数据
+// 合并单个值：智能分发数组/对象/标量
+func (bm *BackupMerger) mergeValue(value1, value2 interface{}, context string) (interface{}, error) {
+	if reflect.DeepEqual(value1, value2) {
+		return value1, nil
+	}
+
+	arr1, isArr1 := value1.([]interface{})
+	arr2, isArr2 := value2.([]interface{})
+	if isArr1 && isArr2 {
+		if hasIDField(arr1) || hasIDField(arr2) {
+			return bm.mergeArrays(arr1, arr2, context)
+		}
+		// 无 ID 的普通数组：整体冲突
+		return bm.resolveConflict(Conflict{
+			Type:    getConflictTypeFromContext(context),
+			Key:     context,
+			Value1:  value1,
+			Value2:  value2,
+			Context: context,
+		})
+	}
+
+	map1, isMap1 := value1.(map[string]interface{})
+	map2, isMap2 := value2.(map[string]interface{})
+	if isMap1 && isMap2 {
+		return bm.mergeMaps(map1, map2, context)
+	}
+
+	// 标量冲突
+	return bm.resolveConflict(Conflict{
+		Type:    getConflictTypeFromContext(context),
+		Key:     context,
+		Value1:  value1,
+		Value2:  value2,
+		Context: context,
+	})
+}
+
+// 合并 map 数据（按 key 逐一智能合并）
 func (bm *BackupMerger) mergeMaps(map1, map2 map[string]interface{}, context string) (map[string]interface{}, error) {
 	merged := make(map[string]interface{})
 
-	// 复制第一个map
 	for key, value := range map1 {
 		merged[key] = value
 	}
 
-	// 合并第二个map
 	for key, value2 := range map2 {
 		if key == "_persist" {
 			continue
 		}
 
+		childCtx := fmt.Sprintf("%s.%s", context, key)
 		if value1, exists := merged[key]; exists {
 			if !reflect.DeepEqual(value1, value2) {
-				resolved, err := bm.resolveConflict(Conflict{
-					Type:    ConflictTypes["localStorage"],
-					Key:     key,
-					Value1:  value1,
-					Value2:  value2,
-					Context: fmt.Sprintf("%s.%s", context, key),
-				})
+				resolved, err := bm.mergeValue(value1, value2, childCtx)
 				if err != nil {
 					return nil, err
 				}
@@ -623,6 +642,28 @@ func getConflictType(tableName string) string {
 	return tableName
 }
 
+// 从 context 路径推断冲突类型（如 "localStorage.providers[openai]" → "AI服务提供商"）
+func getConflictTypeFromContext(context string) string {
+	for key, label := range ConflictTypes {
+		if strings.Contains(context, key) {
+			return label
+		}
+	}
+	return context
+}
+
+// 检查数组中是否存在带 id 字段的对象
+func hasIDField(arr []interface{}) bool {
+	for _, item := range arr {
+		if m, ok := item.(map[string]interface{}); ok {
+			if _, hasID := m["id"]; hasID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func getTimestamp(value interface{}) int64 {
 	if valueMap, ok := value.(map[string]interface{}); ok {
 		if updatedAt, ok := valueMap["updatedAt"].(float64); ok {
@@ -685,9 +726,9 @@ func main() {
 	flag.Parse()
 
 	if *help {
-		fmt.Println(`Cherry Studio 备份文件合并工具 (Go版本)
+		fmt.Println(`Bakfu - 备份文件合并工具
 
-用法: merge-backups [选项] <文件1> <文件2>
+用法: bakfu [选项] <文件1> <文件2>
 
 参数:
   文件1                     第一个备份文件路径 (.zip, .json, .json.gz)
@@ -709,7 +750,7 @@ func main() {
 	}
 
 	if *version {
-		fmt.Println("Cherry Studio 备份合并工具 v1.0.0 (Go版本)")
+		fmt.Println("Bakfu v1.0.0")
 		return
 	}
 
@@ -733,7 +774,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("🚀 Cherry Studio 备份文件合并工具 (Go版本)")
+	fmt.Println("🚀 Bakfu - 备份文件合并工具")
 	fmt.Println(strings.Repeat("=", 50))
 
 	// 创建合并器
