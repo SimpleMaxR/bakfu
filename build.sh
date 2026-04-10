@@ -2,6 +2,11 @@
 
 # Bakfu (Backup Fusion) - 备份文件合并工具构建脚本
 
+# 如果被 zsh/sh 调起，自动切回 bash 执行
+if [ -z "${BASH_VERSION:-}" ]; then
+    exec bash "$0" "$@"
+fi
+
 set -e
 
 echo "🚀 构建 Bakfu - 备份文件合并工具"
@@ -28,52 +33,47 @@ mkdir -p build
 
 # 构建信息
 APP_NAME="bakfu"
-VERSION="1.0.0"
-BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S_UTC')
-COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
 # 构建标志
-BUILD_FLAGS="-ldflags=-s -w -X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME -X main.CommitHash=$COMMIT_HASH"
+LDFLAGS="-s -w"
 
 echo ""
 echo "📦 开始构建..."
 
-# 构建配置
-declare -A PLATFORMS=(
-    ["linux/amd64"]="Linux (64位)"
-    ["linux/arm64"]="Linux (ARM64)"
-    ["darwin/amd64"]="macOS (Intel)"
-    ["darwin/arm64"]="macOS (Apple Silicon)"
-    ["windows/amd64"]="Windows (64位)"
-    ["windows/arm64"]="Windows (ARM64)"
+# 构建配置（兼容 bash 3.x，不使用关联数组）
+PLATFORMS=(
+    "linux/amd64:Linux (64位)"
+    "linux/arm64:Linux (ARM64)"
+    "darwin/amd64:macOS (Intel)"
+    "darwin/arm64:macOS (Apple Silicon)"
+    "windows/amd64:Windows (64位)"
+    "windows/arm64:Windows (ARM64)"
 )
 
 # 构建所有平台
-for platform in "${!PLATFORMS[@]}"; do
-    IFS='/' read -r GOOS GOARCH <<< "$platform"
+for item in "${PLATFORMS[@]}"; do
+    platform="${item%%:*}"
+    platform_name="${item#*:}"
+    GOOS="${platform%%/*}"
+    GOARCH="${platform##*/}"
     output_name="$APP_NAME-$GOOS-$GOARCH"
 
     if [ "$GOOS" = "windows" ]; then
         output_name="$output_name.exe"
     fi
 
-    echo "  🔧 构建 ${PLATFORMS[$platform]} ($GOOS/$GOARCH)..."
+    echo "  🔧 构建 $platform_name ($GOOS/$GOARCH)..."
 
-    env GOOS="$GOOS" GOARCH="$GOARCH" go build $BUILD_FLAGS -o "build/$output_name" merge-backups.go
+    env GOOS="$GOOS" GOARCH="$GOARCH" go build -ldflags "$LDFLAGS" -o "build/$output_name" merge-backups.go
 
-    if [ $? -eq 0 ]; then
-        file_size=$(ls -lh "build/$output_name" | awk '{print $5}')
-        echo "     ✅ 成功 - 文件大小: $file_size"
-    else
-        echo "     ❌ 失败"
-        exit 1
-    fi
+    file_size=$(ls -lh "build/$output_name" | awk '{print $5}')
+    echo "     ✅ 成功 - 文件大小: $file_size"
 done
 
 # 构建当前平台的版本 (无后缀)
 echo ""
 echo "🎯 构建当前平台版本..."
-go build $BUILD_FLAGS -o "build/$APP_NAME" merge-backups.go
+go build -ldflags "$LDFLAGS" -o "build/$APP_NAME" merge-backups.go
 
 if [ $? -eq 0 ]; then
     echo "✅ 当前平台构建成功"

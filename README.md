@@ -68,9 +68,18 @@ bakfu [选项] <文件1> <文件2>
 
 | 格式 | 扩展名 | 说明 |
 |------|--------|------|
-| ZIP | `.zip` | Cherry Studio 标准备份格式 |
-| JSON | `.json` | 未压缩的JSON格式 |
-| 压缩JSON | `.json.gz` | gzip压缩的JSON格式 |
+| ZIP | `.zip` | 支持 Cherry Studio 旧版(v5, `data.json`) 与新版(v6+, `metadata.json`) 备份 |
+| JSON | `.json` | legacy JSON 格式（`time/version/localStorage/indexedDB`） |
+| 压缩JSON | `.json.gz` | legacy JSON 的 gzip 压缩格式 |
+
+### 兼容说明（Cherry Studio）
+
+- ✅ **legacy(v5) + legacy(v5)**：按原有语义进行细粒度合并（`localStorage + indexedDB`）。
+- ✅ **direct(v6+) + direct(v6+)**：
+  - `localStorage` 的 `persist:cherry-studio` 做语义合并。
+  - `IndexedDB` / `Data` 采用整库优先策略（由 `-auto-resolve` 控制）。
+- ✅ **legacy(v5) + direct(v6+)**：按 direct 模式输出，`persist:cherry-studio` 合并，其余目录按策略选择。
+- ℹ️ **包含 direct(v6+) 输入时仅支持 ZIP 输出**（`-format zip` 或输出文件后缀 `.zip`）。
 
 ### 命令选项
 
@@ -78,7 +87,7 @@ bakfu [选项] <文件1> <文件2>
 选项:
   -o <文件>                 输出文件路径 (默认: "merged-backup.zip")
   -auto-resolve <策略>      自动解决策略: newer|older|file1|file2
-  -format <格式>            输出格式: json|json.gz|zip
+  -format <格式>            输出格式: json|json.gz|zip（含v6+输入时仅支持zip）
   -h                        显示帮助信息
   -v                        显示版本信息
 ```
@@ -111,14 +120,17 @@ bakfu [选项] <文件1> <文件2>
 
 ### 指定输出格式
 ```bash
-# 输出为压缩JSON (节省空间)
+# 输出为压缩JSON (节省空间，仅 legacy 输入可用)
 ./bakfu backup1.zip backup2.zip -format json.gz -o merged.json.gz
 
-# 输出为普通JSON (便于查看)
+# 输出为普通JSON (便于查看，仅 legacy 输入可用)
 ./bakfu backup1.zip backup2.zip -format json -o merged.json
 
-# 输出为ZIP (兼容Cherry Studio)
+# 输出为ZIP (兼容 Cherry Studio，推荐)
 ./bakfu backup1.json backup2.json -format zip -o merged.zip
+
+# legacy + v6+ direct 混合输入（必须输出zip）
+./bakfu old-backup.zip new-backup.zip -auto-resolve newer -o merged.zip
 ```
 
 ## 🎬 实战场景
@@ -289,8 +301,17 @@ unzip -t backup.zip
 **3. 大文件处理**
 ```bash
 # 工具内存占用很低，但如果系统资源不足：
-# 先转换为压缩格式
+# 先转换为压缩格式（仅 legacy 输入）
 ./bakfu backup.zip backup.zip -format json.gz -o backup.json.gz
+```
+
+**4. 包含新版备份时报格式错误**
+```bash
+# 错误示例：包含 v6+ 备份却要求 json 输出
+./bakfu old.zip new-v6.zip -format json -o merged.json
+
+# 正确用法：包含 v6+ 时输出 zip
+./bakfu old.zip new-v6.zip -auto-resolve newer -o merged.zip
 ```
 
 ### 调试模式
