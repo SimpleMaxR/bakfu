@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.19"
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Build all platforms
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          APP_NAME="bakfu"
+          LDFLAGS="-s -w -X main.Version=${VERSION} -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S_UTC')"
+          mkdir -p build
+
+          # Linux amd64
+          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o "build/${APP_NAME}-linux-amd64" merge-backups.go
+          # Linux arm64
+          GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o "build/${APP_NAME}-linux-arm64" merge-backups.go
+          # macOS amd64
+          GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o "build/${APP_NAME}-darwin-amd64" merge-backups.go
+          # macOS arm64
+          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o "build/${APP_NAME}-darwin-arm64" merge-backups.go
+          # Windows amd64
+          GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o "build/${APP_NAME}-windows-amd64.exe" merge-backups.go
+          # Windows arm64
+          GOOS=windows GOARCH=arm64 go build -ldflags "$LDFLAGS" -o "build/${APP_NAME}-windows-arm64.exe" merge-backups.go
+
+      - name: Create archives
+        run: |
+          cd build
+          for file in bakfu-*; do
+            if [[ "$file" == *.exe ]]; then
+              zip -q "${file%.exe}.zip" "$file"
+            else
+              tar -czf "$file.tar.gz" "$file"
+            fi
+          done
+
+      - name: Generate checksums
+        run: |
+          cd build
+          sha256sum *.tar.gz *.zip > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            build/*.tar.gz
+            build/*.zip
+            build/checksums.txt
