@@ -938,7 +938,7 @@ func (bm *BackupMerger) mergeTable(table1, table2 []interface{}, tableName strin
 	return bm.mergeArrays(table1, table2, tableName)
 }
 
-// 合并对象数组（按 ID 合并，递归处理差异）
+// 合并对象数组（按 ID 合并，同 ID 不同内容两个都保留）
 func (bm *BackupMerger) mergeArrays(arr1, arr2 []interface{}, context string) ([]interface{}, error) {
 	merged := make([]interface{}, 0)
 	processedIds := make(map[string]bool)
@@ -961,18 +961,14 @@ func (bm *BackupMerger) mergeArrays(arr1, arr2 []interface{}, context string) ([
 
 	for id, item1 := range map1 {
 		processedIds[id] = true
+		merged = append(merged, item1)
 		if item2, exists := map2[id]; exists {
 			if !reflect.DeepEqual(item1, item2) {
-				resolved, err := bm.mergeValue(item1, item2, fmt.Sprintf("%s[%s]", context, id))
-				if err != nil {
-					return nil, err
-				}
-				merged = append(merged, resolved)
-			} else {
-				merged = append(merged, item1)
+				// Same ID, different content: keep both, rename the second copy
+				dup := duplicateWithNewID(item2, "(文件2)")
+				merged = append(merged, dup)
 			}
-		} else {
-			merged = append(merged, item1)
+			// Same ID, same content: already added item1, skip
 		}
 	}
 	for id, item2 := range map2 {
@@ -982,6 +978,38 @@ func (bm *BackupMerger) mergeArrays(arr1, arr2 []interface{}, context string) ([
 	}
 
 	return merged, nil
+}
+
+// duplicateWithNewID clones a map item, assigns a new ID, and appends a suffix to name/title fields.
+func duplicateWithNewID(item interface{}, suffix string) interface{} {
+	itemMap, ok := item.(map[string]interface{})
+	if !ok {
+		return item
+	}
+
+	dup := make(map[string]interface{}, len(itemMap))
+	for k, v := range itemMap {
+		dup[k] = v
+	}
+
+	// Generate a new unique ID
+	if origID, ok := dup["id"].(string); ok {
+		dup["id"] = origID + "_" + generateShortID()
+	}
+
+	// Append suffix to display name fields
+	for _, field := range []string{"name", "title"} {
+		if name, ok := dup[field].(string); ok && name != "" {
+			dup[field] = name + " " + suffix
+		}
+	}
+
+	return dup
+}
+
+// generateShortID returns a short random-ish ID based on current time.
+func generateShortID() string {
+	return fmt.Sprintf("%x", time.Now().UnixNano()&0xFFFFFFFF)
 }
 
 // 合并单个值：智能分发数组/对象/标量

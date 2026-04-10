@@ -128,9 +128,9 @@ func TestMergeArrays_SameIDSameContent(t *testing.T) {
 	}
 }
 
-// 相同 ID、内容不同 → 自动解决（auto-resolve=file1）取 file1 的值
-func TestMergeArrays_SameIDConflict_AutoResolveFile1(t *testing.T) {
-	bm := newMerger() // auto-resolve = file1
+// 相同 ID、内容不同 → 两个都保留，第二个重命名
+func TestMergeArrays_SameIDConflict_KeepBoth(t *testing.T) {
+	bm := newMerger()
 	arr1 := []interface{}{
 		map[string]interface{}{"id": "openai", "name": "OpenAI", "apiKey": "old-key"},
 	}
@@ -143,17 +143,41 @@ func TestMergeArrays_SameIDConflict_AutoResolveFile1(t *testing.T) {
 		t.Fatalf("mergeArrays 失败: %v", err)
 	}
 
-	item := findByID(merged, "openai")
-	if item == nil {
-		t.Fatal("未找到 id=openai 的条目")
+	if len(merged) != 2 {
+		t.Fatalf("同 ID 不同内容应保留两个，期望 2 条，得到 %d 条", len(merged))
 	}
-	// auto-resolve=file1 → 标量冲突取 file1 的值
-	if item["apiKey"] != "old-key" {
-		t.Errorf("期望 apiKey=old-key，得到 %v", item["apiKey"])
+
+	// 第一个是 file1 原样
+	item1 := findByID(merged, "openai")
+	if item1 == nil {
+		t.Fatal("未找到原始 id=openai 的条目")
+	}
+	if item1["apiKey"] != "old-key" {
+		t.Errorf("原始条目应保持 file1 的值，得到 apiKey=%v", item1["apiKey"])
+	}
+
+	// 第二个是 file2 的副本，ID 已改、name 带后缀
+	var item2 map[string]interface{}
+	for _, m := range merged {
+		if mm, ok := m.(map[string]interface{}); ok {
+			if id, _ := mm["id"].(string); id != "openai" && strings.HasPrefix(id, "openai_") {
+				item2 = mm
+				break
+			}
+		}
+	}
+	if item2 == nil {
+		t.Fatal("未找到重命名后的 file2 副本")
+	}
+	if item2["apiKey"] != "new-key" {
+		t.Errorf("副本应保持 file2 的值，得到 apiKey=%v", item2["apiKey"])
+	}
+	if name, _ := item2["name"].(string); !strings.Contains(name, "(文件2)") {
+		t.Errorf("副本 name 应含 '(文件2)'，得到 '%s'", name)
 	}
 }
 
-// 三个文件合并场景：file1 有 A，file2 有 A+B → 结果应有 A（已合并）和 B
+// file1 有 A，file2 有 A(不同)+B → 结果应有 A(file1) + A(file2 副本) + B
 func TestMergeArrays_MixedIDsWithConflict(t *testing.T) {
 	bm := newMerger()
 	arr1 := []interface{}{
@@ -169,9 +193,18 @@ func TestMergeArrays_MixedIDsWithConflict(t *testing.T) {
 		t.Fatalf("mergeArrays 失败: %v", err)
 	}
 
-	ids := collectIDs(merged)
-	if !reflect.DeepEqual(ids, []string{"gemini", "openai"}) {
-		t.Errorf("期望 [gemini openai]，得到 %v", ids)
+	// Should have 3 items: openai(file1) + openai_xxx(file2) + gemini
+	if len(merged) != 3 {
+		t.Errorf("期望 3 条(两个 openai + gemini)，得到 %d 条", len(merged))
+	}
+
+	// gemini should be present
+	if findByID(merged, "gemini") == nil {
+		t.Error("应包含 gemini")
+	}
+	// original openai should be present
+	if findByID(merged, "openai") == nil {
+		t.Error("应包含原始 openai")
 	}
 }
 
