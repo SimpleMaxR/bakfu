@@ -1146,31 +1146,129 @@ func (bm *BackupMerger) printValue(value interface{}) {
 	}
 }
 
+// tryParseJSON attempts to parse a string as JSON, returning the parsed value or nil.
+func tryParseJSON(v interface{}) interface{} {
+	s, ok := v.(string)
+	if !ok {
+		return nil
+	}
+	var parsed interface{}
+	if err := json.Unmarshal([]byte(s), &parsed); err != nil {
+		return nil
+	}
+	return parsed
+}
+
 // 显示差异
 func (bm *BackupMerger) showDiff(value1, value2 interface{}) {
 	fmt.Println("\n🔍 详细差异:")
 
+	// If both values are JSON strings, parse and compare the inner structure
+	if parsed1 := tryParseJSON(value1); parsed1 != nil {
+		if parsed2 := tryParseJSON(value2); parsed2 != nil {
+			bm.showDiffParsed(parsed1, parsed2)
+			return
+		}
+	}
+
 	if map1, ok1 := value1.(map[string]interface{}); ok1 {
 		if map2, ok2 := value2.(map[string]interface{}); ok2 {
-			keys := make(map[string]bool)
-			for key := range map1 {
-				keys[key] = true
-			}
-			for key := range map2 {
-				keys[key] = true
-			}
-
-			for key := range keys {
-				val1 := map1[key]
-				val2 := map2[key]
-
-				if !reflect.DeepEqual(val1, val2) {
-					fmt.Printf("\n  %s:\n", key)
-					fmt.Printf("    文件1: %v\n", formatValue(val1))
-					fmt.Printf("    文件2: %v\n", formatValue(val2))
-				}
-			}
+			bm.showMapDiff(map1, map2)
+			return
 		}
+	}
+
+	// Fallback: show both values directly
+	fmt.Printf("\n  文件1: %s\n", formatValueLong(value1))
+	fmt.Printf("  文件2: %s\n", formatValueLong(value2))
+}
+
+func (bm *BackupMerger) showDiffParsed(v1, v2 interface{}) {
+	map1, ok1 := v1.(map[string]interface{})
+	map2, ok2 := v2.(map[string]interface{})
+	if ok1 && ok2 {
+		bm.showMapDiff(map1, map2)
+		return
+	}
+
+	fmt.Printf("\n  文件1: %s\n", formatValueLong(v1))
+	fmt.Printf("  文件2: %s\n", formatValueLong(v2))
+}
+
+func (bm *BackupMerger) showMapDiff(map1, map2 map[string]interface{}) {
+	keys := make(map[string]bool)
+	for key := range map1 {
+		keys[key] = true
+	}
+	for key := range map2 {
+		keys[key] = true
+	}
+
+	// Sort keys for stable output
+	sortedKeys := make([]string, 0, len(keys))
+	for key := range keys {
+		sortedKeys = append(sortedKeys, key)
+	}
+	sort.Strings(sortedKeys)
+
+	hasDiff := false
+	for _, key := range sortedKeys {
+		val1, in1 := map1[key]
+		val2, in2 := map2[key]
+
+		if !in1 {
+			fmt.Printf("\n  %s:\n", key)
+			fmt.Printf("    文件1: (不存在)\n")
+			fmt.Printf("    文件2: %s\n", formatValueLong(val2))
+			hasDiff = true
+		} else if !in2 {
+			fmt.Printf("\n  %s:\n", key)
+			fmt.Printf("    文件1: %s\n", formatValueLong(val1))
+			fmt.Printf("    文件2: (不存在)\n")
+			hasDiff = true
+		} else if !reflect.DeepEqual(val1, val2) {
+			fmt.Printf("\n  %s:\n", key)
+			fmt.Printf("    文件1: %s\n", formatValueLong(val1))
+			fmt.Printf("    文件2: %s\n", formatValueLong(val2))
+			hasDiff = true
+		}
+	}
+
+	if !hasDiff {
+		fmt.Println("  (无差异)")
+	}
+}
+
+func formatValueLong(value interface{}) string {
+	if value == nil {
+		return "null"
+	}
+	switch v := value.(type) {
+	case string:
+		if len(v) > 200 {
+			return v[:200] + "..."
+		}
+		return v
+	case map[string]interface{}:
+		b, _ := json.Marshal(v)
+		s := string(b)
+		if len(s) > 200 {
+			return s[:200] + "..."
+		}
+		return s
+	case []interface{}:
+		b, _ := json.Marshal(v)
+		s := string(b)
+		if len(s) > 200 {
+			return s[:200] + "..."
+		}
+		return s
+	default:
+		s := fmt.Sprintf("%v", v)
+		if len(s) > 200 {
+			return s[:200] + "..."
+		}
+		return s
 	}
 }
 
