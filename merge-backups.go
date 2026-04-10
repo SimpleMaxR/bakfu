@@ -990,6 +990,27 @@ func (bm *BackupMerger) mergeValue(value1, value2 interface{}, context string) (
 		return value1, nil
 	}
 
+	// If both are JSON strings, parse and merge the inner structure
+	str1, isStr1 := value1.(string)
+	str2, isStr2 := value2.(string)
+	if isStr1 && isStr2 {
+		var parsed1, parsed2 interface{}
+		err1 := json.Unmarshal([]byte(str1), &parsed1)
+		err2 := json.Unmarshal([]byte(str2), &parsed2)
+		if err1 == nil && err2 == nil {
+			merged, err := bm.mergeValue(parsed1, parsed2, context)
+			if err != nil {
+				return nil, err
+			}
+			// Re-serialize back to JSON string
+			b, err := json.Marshal(merged)
+			if err != nil {
+				return nil, err
+			}
+			return string(b), nil
+		}
+	}
+
 	arr1, isArr1 := value1.([]interface{})
 	arr2, isArr2 := value2.([]interface{})
 	if isArr1 && isArr2 {
