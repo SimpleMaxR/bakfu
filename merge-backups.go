@@ -1131,18 +1131,52 @@ func (bm *BackupMerger) interactiveResolve(conflict Conflict) (interface{}, erro
 
 // 打印值
 func (bm *BackupMerger) printValue(value interface{}) {
+	// If it's a JSON string, parse and display the inner structure
+	if parsed := tryParseJSON(value); parsed != nil {
+		bm.printParsedValue(parsed)
+		return
+	}
+
 	if valueMap, ok := value.(map[string]interface{}); ok {
-		count := 0
-		for key, val := range valueMap {
-			if count >= 5 {
-				fmt.Println("  ...")
+		bm.printMapValue(valueMap)
+	} else {
+		fmt.Printf("  %v\n", formatValueLong(value))
+	}
+}
+
+func (bm *BackupMerger) printParsedValue(value interface{}) {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		bm.printMapValue(v)
+	case []interface{}:
+		fmt.Printf("  [数组: %d 项]\n", len(v))
+		for i, item := range v {
+			if i >= 5 {
+				fmt.Printf("  ... (共 %d 项)\n", len(v))
 				break
 			}
-			fmt.Printf("  %s: %v\n", key, formatValue(val))
-			count++
+			fmt.Printf("  [%d]: %s\n", i, formatValueLong(item))
 		}
-	} else {
-		fmt.Printf("  %v\n", formatValue(value))
+	default:
+		fmt.Printf("  %s\n", formatValueLong(value))
+	}
+}
+
+func (bm *BackupMerger) printMapValue(m map[string]interface{}) {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	count := 0
+	for _, key := range keys {
+		if count >= 8 {
+			fmt.Printf("  ... (共 %d 个字段)\n", len(m))
+			break
+		}
+		fmt.Printf("  %s: %s\n", key, formatValueLong(m[key]))
+		count++
 	}
 }
 
