@@ -1,4 +1,4 @@
-package main
+package merge
 
 import (
 	"archive/zip"
@@ -46,13 +46,13 @@ func collectIDs(arr []interface{}) []string {
 	return ids
 }
 
-// ─── hasIDField ───────────────────────────────────────────────────────────────
+// ─── HasIDField ───────────────────────────────────────────────────────────────
 
 func TestHasIDField_WithID(t *testing.T) {
 	arr := []interface{}{
 		map[string]interface{}{"id": "a", "name": "A"},
 	}
-	if !hasIDField(arr) {
+	if !HasIDField(arr) {
 		t.Error("期望返回 true，但返回了 false")
 	}
 }
@@ -61,21 +61,21 @@ func TestHasIDField_WithoutID(t *testing.T) {
 	arr := []interface{}{
 		map[string]interface{}{"name": "A"},
 	}
-	if hasIDField(arr) {
+	if HasIDField(arr) {
 		t.Error("期望返回 false，但返回了 true")
 	}
 }
 
 func TestHasIDField_Empty(t *testing.T) {
-	if hasIDField([]interface{}{}) {
+	if HasIDField([]interface{}{}) {
 		t.Error("空数组期望返回 false")
 	}
 }
 
-// ─── getConflictTypeFromContext ───────────────────────────────────────────────
+// ─── GetConflictTypeFromContext ───────────────────────────────────────────────
 
 func TestGetConflictTypeFromContext_KnownKey(t *testing.T) {
-	result := getConflictTypeFromContext("localStorage.providers[openai]")
+	result := GetConflictTypeFromContext("localStorage.providers[openai]")
 	if result != "AI服务提供商" {
 		t.Errorf("期望 'AI服务提供商'，得到 '%s'", result)
 	}
@@ -83,13 +83,13 @@ func TestGetConflictTypeFromContext_KnownKey(t *testing.T) {
 
 func TestGetConflictTypeFromContext_UnknownKey(t *testing.T) {
 	ctx := "localStorage.unknownField"
-	result := getConflictTypeFromContext(ctx)
+	result := GetConflictTypeFromContext(ctx)
 	if result != ctx {
 		t.Errorf("未知路径应原样返回，得到 '%s'", result)
 	}
 }
 
-// ─── mergeArrays ─────────────────────────────────────────────────────────────
+// ─── MergeArrays ─────────────────────────────────────────────────────────────
 
 // 两个文件各自独有的条目都应保留
 func TestMergeArrays_UniqueIDsFromBothFiles(t *testing.T) {
@@ -101,9 +101,9 @@ func TestMergeArrays_UniqueIDsFromBothFiles(t *testing.T) {
 		map[string]interface{}{"id": "claude", "name": "Claude"},
 	}
 
-	merged, err := bm.mergeArrays(arr1, arr2, "providers")
+	merged, err := bm.MergeArrays(arr1, arr2, "providers")
 	if err != nil {
-		t.Fatalf("mergeArrays 失败: %v", err)
+		t.Fatalf("MergeArrays 失败: %v", err)
 	}
 
 	ids := collectIDs(merged)
@@ -119,9 +119,9 @@ func TestMergeArrays_SameIDSameContent(t *testing.T) {
 	arr1 := []interface{}{item}
 	arr2 := []interface{}{item}
 
-	merged, err := bm.mergeArrays(arr1, arr2, "providers")
+	merged, err := bm.MergeArrays(arr1, arr2, "providers")
 	if err != nil {
-		t.Fatalf("mergeArrays 失败: %v", err)
+		t.Fatalf("MergeArrays 失败: %v", err)
 	}
 	if len(merged) != 1 {
 		t.Errorf("相同内容应去重，期望 1 条，得到 %d 条", len(merged))
@@ -138,9 +138,9 @@ func TestMergeArrays_SameIDConflict_KeepBoth(t *testing.T) {
 		map[string]interface{}{"id": "openai", "name": "OpenAI Pro", "apiKey": "new-key"},
 	}
 
-	merged, err := bm.mergeArrays(arr1, arr2, "providers")
+	merged, err := bm.MergeArrays(arr1, arr2, "providers")
 	if err != nil {
-		t.Fatalf("mergeArrays 失败: %v", err)
+		t.Fatalf("MergeArrays 失败: %v", err)
 	}
 
 	if len(merged) != 2 {
@@ -188,9 +188,9 @@ func TestMergeArrays_MixedIDsWithConflict(t *testing.T) {
 		map[string]interface{}{"id": "gemini", "name": "Gemini"},
 	}
 
-	merged, err := bm.mergeArrays(arr1, arr2, "providers")
+	merged, err := bm.MergeArrays(arr1, arr2, "providers")
 	if err != nil {
-		t.Fatalf("mergeArrays 失败: %v", err)
+		t.Fatalf("MergeArrays 失败: %v", err)
 	}
 
 	// Should have 3 items: openai(file1) + openai_xxx(file2) + gemini
@@ -208,21 +208,21 @@ func TestMergeArrays_MixedIDsWithConflict(t *testing.T) {
 	}
 }
 
-// ─── mergeValue ──────────────────────────────────────────────────────────────
+// ─── MergeValue ──────────────────────────────────────────────────────────────
 
 // 相同值直接返回，不触发冲突
 func TestMergeValue_EqualValues(t *testing.T) {
 	bm := newMerger()
-	result, err := bm.mergeValue("hello", "hello", "ctx")
+	result, err := bm.MergeValue("hello", "hello", "ctx")
 	if err != nil {
-		t.Fatalf("mergeValue 失败: %v", err)
+		t.Fatalf("MergeValue 失败: %v", err)
 	}
 	if result != "hello" {
 		t.Errorf("相同值应原样返回，得到 %v", result)
 	}
 }
 
-// 两个带 ID 的数组 → 走 mergeArrays 路径（按 ID 合并）
+// 两个带 ID 的数组 → 走 MergeArrays 路径（按 ID 合并）
 func TestMergeValue_ArraysWithID(t *testing.T) {
 	bm := newMerger()
 	v1 := []interface{}{
@@ -232,9 +232,9 @@ func TestMergeValue_ArraysWithID(t *testing.T) {
 		map[string]interface{}{"id": "b", "x": 2},
 	}
 
-	result, err := bm.mergeValue(v1, v2, "ctx")
+	result, err := bm.MergeValue(v1, v2, "ctx")
 	if err != nil {
-		t.Fatalf("mergeValue 失败: %v", err)
+		t.Fatalf("MergeValue 失败: %v", err)
 	}
 
 	arr, ok := result.([]interface{})
@@ -247,15 +247,15 @@ func TestMergeValue_ArraysWithID(t *testing.T) {
 	}
 }
 
-// 两个 map → 走 mergeMaps 路径（递归合并）
+// 两个 map → 走 MergeMaps 路径（递归合并）
 func TestMergeValue_Maps(t *testing.T) {
 	bm := newMerger()
 	v1 := map[string]interface{}{"theme": "dark", "lang": "zh"}
 	v2 := map[string]interface{}{"theme": "light", "fontSize": 14}
 
-	result, err := bm.mergeValue(v1, v2, "settings")
+	result, err := bm.MergeValue(v1, v2, "settings")
 	if err != nil {
-		t.Fatalf("mergeValue 失败: %v", err)
+		t.Fatalf("MergeValue 失败: %v", err)
 	}
 
 	m, ok := result.(map[string]interface{})
@@ -272,7 +272,7 @@ func TestMergeValue_Maps(t *testing.T) {
 	}
 }
 
-// ─── mergeMaps ────────────────────────────────────────────────────────────────
+// ─── MergeMaps ────────────────────────────────────────────────────────────────
 
 // 无冲突：两个 map 的 key 各不相同 → 合并所有 key
 func TestMergeMaps_NoConflict(t *testing.T) {
@@ -280,9 +280,9 @@ func TestMergeMaps_NoConflict(t *testing.T) {
 	m1 := map[string]interface{}{"a": 1, "b": 2}
 	m2 := map[string]interface{}{"c": 3, "d": 4}
 
-	result, err := bm.mergeMaps(m1, m2, "ctx")
+	result, err := bm.MergeMaps(m1, m2, "ctx")
 	if err != nil {
-		t.Fatalf("mergeMaps 失败: %v", err)
+		t.Fatalf("MergeMaps 失败: %v", err)
 	}
 	if len(result) != 4 {
 		t.Errorf("期望 4 个 key，得到 %d", len(result))
@@ -295,9 +295,9 @@ func TestMergeMaps_ScalarConflict_AutoResolveFile1(t *testing.T) {
 	m1 := map[string]interface{}{"theme": "dark"}
 	m2 := map[string]interface{}{"theme": "light"}
 
-	result, err := bm.mergeMaps(m1, m2, "settings")
+	result, err := bm.MergeMaps(m1, m2, "settings")
 	if err != nil {
-		t.Fatalf("mergeMaps 失败: %v", err)
+		t.Fatalf("MergeMaps 失败: %v", err)
 	}
 	if result["theme"] != "dark" {
 		t.Errorf("auto-resolve=file1 时期望 theme=dark，得到 %v", result["theme"])
@@ -310,9 +310,9 @@ func TestMergeMaps_SkipPersistKey(t *testing.T) {
 	m1 := map[string]interface{}{"a": 1}
 	m2 := map[string]interface{}{"a": 1, "_persist": "should-be-ignored"}
 
-	result, err := bm.mergeMaps(m1, m2, "ctx")
+	result, err := bm.MergeMaps(m1, m2, "ctx")
 	if err != nil {
-		t.Fatalf("mergeMaps 失败: %v", err)
+		t.Fatalf("MergeMaps 失败: %v", err)
 	}
 	if _, exists := result["_persist"]; exists {
 		t.Error("_persist 应被过滤，不应出现在合并结果中")
@@ -333,9 +333,9 @@ func TestMergeMaps_NestedProvidersArrayMergedByID(t *testing.T) {
 		},
 	}
 
-	result, err := bm.mergeMaps(m1, m2, "localStorage")
+	result, err := bm.MergeMaps(m1, m2, "localStorage")
 	if err != nil {
-		t.Fatalf("mergeMaps 失败: %v", err)
+		t.Fatalf("MergeMaps 失败: %v", err)
 	}
 
 	providers, ok := result["providers"].([]interface{})
@@ -655,7 +655,7 @@ func TestSaveDirectBackup_WritesMetadataAndPersist(t *testing.T) {
 		}
 	}
 
-	persist, err := readPersistCherryStudio(filepath.Join(extractDir, "Local Storage", "leveldb"))
+	persist, err := ReadPersistCherryStudio(filepath.Join(extractDir, "Local Storage", "leveldb"))
 	if err != nil {
 		t.Fatalf("读取输出 persist 失败: %v", err)
 	}
@@ -674,8 +674,8 @@ func writePersistChromiumKey(t *testing.T, leveldbDir, value string) {
 	}
 	defer db.Close()
 	// Write with Chromium format: UTF-16LE with 0x00 prefix
-	encoded := append([]byte{0x00}, encodeUTF16LE(value)...)
-	if err := db.Put(chromiumPersistKey, encoded, nil); err != nil {
+	encoded := append([]byte{0x00}, EncodeUTF16LE(value)...)
+	if err := db.Put(GetChromiumPersistKey(), encoded, nil); err != nil {
 		t.Fatalf("写入 chromium key 失败: %v", err)
 	}
 }
@@ -687,9 +687,9 @@ func TestReadPersistCherryStudio_ChromiumKey(t *testing.T) {
 	}
 	writePersistChromiumKey(t, dir, `{"theme":"dark"}`)
 
-	result, err := readPersistCherryStudio(dir)
+	result, err := ReadPersistCherryStudio(dir)
 	if err != nil {
-		t.Fatalf("readPersistCherryStudio 失败: %v", err)
+		t.Fatalf("ReadPersistCherryStudio 失败: %v", err)
 	}
 	if result != `{"theme":"dark"}` {
 		t.Fatalf("期望 {\"theme\":\"dark\"}，得到 %s", result)
@@ -703,9 +703,9 @@ func TestReadPersistCherryStudio_FallbackToSimpleKey(t *testing.T) {
 	}
 	writePersistToLevelDB(t, dir, `{"simple":true}`)
 
-	result, err := readPersistCherryStudio(dir)
+	result, err := ReadPersistCherryStudio(dir)
 	if err != nil {
-		t.Fatalf("readPersistCherryStudio 失败: %v", err)
+		t.Fatalf("ReadPersistCherryStudio 失败: %v", err)
 	}
 	if result != `{"simple":true}` {
 		t.Fatalf("期望 {\"simple\":true}，得到 %s", result)
@@ -720,15 +720,15 @@ func TestWritePersistCherryStudio_UpdatesChromiumKey(t *testing.T) {
 	// First write a chromium key
 	writePersistChromiumKey(t, dir, `{"old":true}`)
 
-	// Now write via writePersistCherryStudio - should update chromium key
-	if err := writePersistCherryStudio(dir, `{"new":true}`); err != nil {
-		t.Fatalf("writePersistCherryStudio 失败: %v", err)
+	// Now write via WritePersistCherryStudio - should update chromium key
+	if err := WritePersistCherryStudio(dir, `{"new":true}`); err != nil {
+		t.Fatalf("WritePersistCherryStudio 失败: %v", err)
 	}
 
 	// Read back - should get new value
-	result, err := readPersistCherryStudio(dir)
+	result, err := ReadPersistCherryStudio(dir)
 	if err != nil {
-		t.Fatalf("readPersistCherryStudio 失败: %v", err)
+		t.Fatalf("ReadPersistCherryStudio 失败: %v", err)
 	}
 	if result != `{"new":true}` {
 		t.Fatalf("期望 {\"new\":true}，得到 %s", result)
@@ -737,7 +737,7 @@ func TestWritePersistCherryStudio_UpdatesChromiumKey(t *testing.T) {
 
 func TestDecodeUTF16LE_BasicASCII(t *testing.T) {
 	input := []byte{'h', 0, 'i', 0}
-	result := decodeUTF16LE(input)
+	result := DecodeUTF16LE(input)
 	if result != "hi" {
 		t.Fatalf("期望 'hi'，得到 '%s'", result)
 	}
@@ -745,8 +745,8 @@ func TestDecodeUTF16LE_BasicASCII(t *testing.T) {
 
 func TestDecodeUTF16LE_Chinese(t *testing.T) {
 	// 测 = U+6D4B → bytes 0x4B, 0x6D
-	input := encodeUTF16LE("测试")
-	result := decodeUTF16LE(input)
+	input := EncodeUTF16LE("测试")
+	result := DecodeUTF16LE(input)
 	if result != "测试" {
 		t.Fatalf("期望 '测试'，得到 '%s'", result)
 	}
